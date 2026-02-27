@@ -1,4 +1,5 @@
 import unittest
+from datetime import timedelta
 
 from sqlmodel import select
 
@@ -9,6 +10,7 @@ from evercore.executors.registry import ExecutorRegistry
 from evercore.models import Task, TaskLog, WorkerHeartbeat
 from evercore.schemas import TaskCreateRequest, TicketCreateRequest
 from evercore.services import TicketService, WorkerService
+from evercore.time_utils import coerce_utc, now_utc
 from evercore.workflow import WorkflowLoader
 
 
@@ -16,6 +18,23 @@ class _SuccessExecutor(TaskExecutor):
     def execute(self, ticket, task):
         del ticket, task
         return ExecutionResult(success=True, message="ok", output={"done": True})
+
+
+class _FailExecutor(TaskExecutor):
+    def execute(self, ticket, task):
+        del ticket, task
+        return ExecutionResult(success=False, message="boom", output={"ok": False})
+
+
+class _DeferExecutor(TaskExecutor):
+    def execute(self, ticket, task):
+        del ticket, task
+        return ExecutionResult(
+            success=False,
+            defer=True,
+            defer_seconds=1,
+            message="waiting for external signal",
+        )
 
 
 class WorkerServiceTests(unittest.TestCase):
@@ -93,6 +112,96 @@ class WorkerServiceTests(unittest.TestCase):
         self.assertEqual(second_state, "completed")
         self.assertEqual(summary.stage, "finished")
         self.assertEqual(summary.status, "completed")
+
+    def test_failed_task_enters_retry_then_dead_letter(self):
+        service = WorkerService(ExecutorRegistry(executors={"always_fail": _FailExecutor()}))
+        with session_scope() as session:
+            ticket = self.ticket_service.create_ticket(session, TicketCreateRequest(title="retry"))
+            task = self.ticket_service.create_task(
+                session,
+                ticket.ticket_id,
+                TaskCreateRequest(task_key="always_fail", max_attempts=2),
+            )
+            task_id = task.id
+
+        with session_scope() as session:
+            first = service.process_once(session, worker_id="worker-retry")
+            self.assertTrue(first.processed)
+            row = session.exec(select(Task).where(Task.id == task_id)).first()
+            self.assertEqual(row.state, "retrying")
+            self.assertIsNotNone(row.next_run_at)
+
+        with session_scope() as session:
+            row = session.exec(select(Task).where(Task.id == task_id)).first()
+            row.next_run_at = now_utc() - timedelta(seconds=1)
+            session.add(row)
+
+        with session_scope() as session:
+            second = service.process_once(session, worker_id="worker-retry")
+            self.assertTrue(second.processed)
+            row = session.exec(select(Task).where(Task.id == task_id)).first()
+            self.assertEqual(row.state, "dead_letter")
+
+    def test_cancel_request_cancels_before_execution(self):
+        service = WorkerService(ExecutorRegistry(executors={"simple": _SuccessExecutor()}))
+        with session_scope() as session:
+            ticket = self.ticket_service.create_ticket(session, TicketCreateRequest(title="cancel"))
+            task = self.ticket_service.create_task(
+                session, ticket.ticket_id, TaskCreateRequest(task_key="simple")
+            )
+            task.cancel_requested = True
+            task.cancel_requested_at = now_utc()
+            session.add(task)
+            task_id = task.id
+
+        with session_scope() as session:
+            result = service.process_once(session, worker_id="worker-cancel")
+            self.assertTrue(result.processed)
+            row = session.exec(select(Task).where(Task.id == task_id)).first()
+            self.assertEqual(row.state, "cancelled")
+
+    def test_deferred_result_requeues_without_consuming_attempts(self):
+        service = WorkerService(ExecutorRegistry(executors={"defer": _DeferExecutor()}))
+        with session_scope() as session:
+            ticket = self.ticket_service.create_ticket(session, TicketCreateRequest(title="defer"))
+            task = self.ticket_service.create_task(
+                session,
+                ticket.ticket_id,
+                TaskCreateRequest(task_key="defer", max_attempts=2),
+            )
+            task_id = task.id
+
+        with session_scope() as session:
+            result = service.process_once(session, worker_id="worker-defer")
+            self.assertTrue(result.processed)
+            row = session.exec(select(Task).where(Task.id == task_id)).first()
+            self.assertEqual(row.state, "retrying")
+            self.assertEqual(row.attempt_count, 0)
+            self.assertIsNotNone(row.next_run_at)
+
+    def test_retry_policy_uses_task_overrides(self):
+        service = WorkerService(ExecutorRegistry(executors={"always_fail": _FailExecutor()}))
+        with session_scope() as session:
+            ticket = self.ticket_service.create_ticket(session, TicketCreateRequest(title="retry-override"))
+            task = self.ticket_service.create_task(
+                session,
+                ticket.ticket_id,
+                TaskCreateRequest(
+                    task_key="always_fail",
+                    max_attempts=5,
+                    retry_base_seconds=1,
+                    retry_max_seconds=2,
+                ),
+            )
+            task_id = task.id
+
+        with session_scope() as session:
+            result = service.process_once(session, worker_id="worker-retry-override")
+            self.assertTrue(result.processed)
+            row = session.exec(select(Task).where(Task.id == task_id)).first()
+            self.assertEqual(row.state, "retrying")
+            delta = coerce_utc(row.next_run_at) - now_utc()
+            self.assertLessEqual(delta.total_seconds(), 2.5)
 
 
 if __name__ == "__main__":

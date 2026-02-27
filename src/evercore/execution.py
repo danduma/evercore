@@ -14,6 +14,9 @@ class ExecutionResult:
     success: bool
     message: str = ""
     output: dict[str, Any] = field(default_factory=dict)
+    defer: bool = False
+    defer_seconds: int | None = None
+    terminal_failure: bool = False
 
 
 class TaskExecutor(ABC):

@@ -41,7 +41,23 @@ class StatePolicyTests(unittest.TestCase):
         queued_update = self.policy.resolve(self.ticket, tasks)
         self.assertEqual(queued_update.stage, "running")
 
+    def test_paused_ticket_stays_paused(self):
+        self.ticket.paused = True
+        self.ticket.stage = "running"
+        update = self.policy.resolve(self.ticket, [Task(ticket_id="t", task_key="a", state="queued")])
+        self.assertEqual(update.stage, "running")
+        self.assertEqual(update.status, "paused")
+
+    def test_pending_approval_overrides_task_states(self):
+        self.ticket.approval_required = True
+        self.ticket.approval_status = "pending"
+        update = self.policy.resolve(
+            self.ticket,
+            [Task(ticket_id="t", task_key="a", state="queued")],
+        )
+        self.assertEqual(update.stage, "pending_approval")
+        self.assertEqual(update.status, "waiting_approval")
+
 
 if __name__ == "__main__":
     unittest.main()
-

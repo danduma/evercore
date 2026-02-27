@@ -2,24 +2,31 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = os.getenv("EVERCORE_DATABASE_URL", "sqlite:///./evercore.db")
-    api_host: str = os.getenv("EVERCORE_API_HOST", "0.0.0.0")
-    api_port: int = int(os.getenv("EVERCORE_API_PORT", "8010"))
-    workflow_dir: str = os.getenv("EVERCORE_WORKFLOW_DIR", "./workflows")
-    default_workflow_key: str = os.getenv("EVERCORE_DEFAULT_WORKFLOW_KEY", "default_ticket")
-    worker_poll_interval_seconds: float = float(os.getenv("EVERCORE_WORKER_POLL_INTERVAL", "2.0"))
-    worker_id: str = os.getenv("EVERCORE_WORKER_ID", "evercore-worker-1")
-    default_lemlem_model: str = os.getenv("EVERCORE_DEFAULT_LEMLEM_MODEL", "openrouter:gemini-2.5-flash")
+    database_url: str = "sqlite:///./evercore.db"
+    api_host: str = "0.0.0.0"
+    api_port: int = 8010
+    workflow_dir: str = "./workflows"
+    default_workflow_key: str = "default_ticket"
+    worker_poll_interval_seconds: float = 2.0
+    worker_id: str = "evercore-worker-1"
+    task_lease_seconds: int = 300
+    stale_task_timeout_seconds: int = 900
+    default_max_attempts: int = 3
+    retry_base_seconds: int = 10
+    retry_max_seconds: int = 600
+    event_wait_poll_interval_seconds: int = 15
+    schedule_batch_size: int = 10
+    default_lemlem_model: str = "openrouter:gemini-2.5-flash"
 
     class Config:
         env_file = ".env"
+        env_prefix = "EVERCORE_"
         extra = "ignore"
 
     @property

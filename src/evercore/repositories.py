@@ -4,9 +4,18 @@ from __future__ import annotations
 
 from typing import Optional
 
+from sqlalchemy import or_
 from sqlmodel import Session, select
 
-from .models import Task, TaskDependency, TaskLog, Ticket, WorkerHeartbeat
+from .models import (
+    Task,
+    TaskDependency,
+    TaskLog,
+    Ticket,
+    TicketEvent,
+    TicketSchedule,
+    WorkerHeartbeat,
+)
 from .time_utils import now_utc
 
 
@@ -37,7 +46,13 @@ def list_dependencies(session: Session, task_id: int) -> list[TaskDependency]:
 
 
 def list_queued_tasks(session: Session) -> list[Task]:
-    statement = select(Task).where(Task.state == "queued").order_by(Task.created_at.asc())
+    now = now_utc()
+    statement = (
+        select(Task)
+        .where(Task.state.in_(["queued", "retrying"]))
+        .where(or_(Task.next_run_at.is_(None), Task.next_run_at <= now))
+        .order_by(Task.created_at.asc())
+    )
     return list(session.exec(statement).all())
 
 
@@ -83,3 +98,64 @@ def add_task_log(
     )
     session.add(row)
     return row
+
+
+def add_ticket_event(
+    session: Session,
+    *,
+    ticket_id: str,
+    event_type: str,
+    payload: dict | None = None,
+) -> TicketEvent:
+    row = TicketEvent(
+        ticket_id=ticket_id,
+        event_type=event_type,
+        payload=payload or {},
+    )
+    session.add(row)
+    return row
+
+
+def list_ticket_events(session: Session, ticket_id: str, limit: int = 100) -> list[TicketEvent]:
+    statement = (
+        select(TicketEvent)
+        .where(TicketEvent.ticket_id == ticket_id)
+        .order_by(TicketEvent.created_at.desc())
+        .limit(limit)
+    )
+    return list(session.exec(statement).all())
+
+
+def get_unconsumed_ticket_event(
+    session: Session,
+    *,
+    ticket_id: str,
+    event_type: str,
+) -> Optional[TicketEvent]:
+    statement = (
+        select(TicketEvent)
+        .where(TicketEvent.ticket_id == ticket_id)
+        .where(TicketEvent.event_type == event_type)
+        .where(TicketEvent.consumed_at.is_(None))
+        .order_by(TicketEvent.created_at.asc())
+    )
+    return session.exec(statement).first()
+
+
+def get_schedule_by_id(session: Session, schedule_id: int) -> Optional[TicketSchedule]:
+    statement = select(TicketSchedule).where(TicketSchedule.id == schedule_id)
+    return session.exec(statement).first()
+
+
+def get_schedule_by_key(session: Session, schedule_key: str) -> Optional[TicketSchedule]:
+    statement = select(TicketSchedule).where(TicketSchedule.schedule_key == schedule_key)
+    return session.exec(statement).first()
+
+
+def list_schedules(session: Session, limit: int = 200) -> list[TicketSchedule]:
+    statement = (
+        select(TicketSchedule)
+        .order_by(TicketSchedule.created_at.asc())
+        .limit(limit)
+    )
+    return list(session.exec(statement).all())

@@ -67,6 +67,53 @@ class TicketServiceTests(unittest.TestCase):
         self.assertEqual(summary.stage, "running")
         self.assertEqual(len(summary.tasks), 2)
 
+    def test_pause_and_resume_ticket_updates_task_states(self):
+        with session_scope() as session:
+            ticket = self.ticket_service.create_ticket(session, TicketCreateRequest(title="pause"))
+            ticket_id = ticket.ticket_id
+            task = self.ticket_service.create_task(
+                session,
+                ticket.ticket_id,
+                TaskCreateRequest(task_key="noop"),
+            )
+            task_id = task.id
+            self.ticket_service.pause_ticket(session, ticket.ticket_id)
+
+        with session_scope() as session:
+            summary = self.ticket_service.get_ticket_summary(session, ticket_id)
+            self.assertTrue(summary.paused)
+            self.assertEqual(summary.tasks[0].state, "paused")
+            self.ticket_service.resume_ticket(session, ticket_id)
+            resumed = self.ticket_service.get_ticket_summary(session, ticket_id)
+            self.assertFalse(resumed.paused)
+            self.assertEqual(resumed.tasks[0].id, task_id)
+            self.assertEqual(resumed.tasks[0].state, "queued")
+
+    def test_request_and_approve_ticket_approval(self):
+        with session_scope() as session:
+            ticket = self.ticket_service.create_ticket(session, TicketCreateRequest(title="approval"))
+            self.ticket_service.request_approval(session, ticket.ticket_id, notes="check")
+            pending = self.ticket_service.get_ticket_summary(session, ticket.ticket_id)
+            self.assertEqual(pending.approval_status, "pending")
+            self.assertEqual(pending.stage, "pending_approval")
+
+            self.ticket_service.approve_ticket(session, ticket.ticket_id, notes="ok")
+            approved = self.ticket_service.get_ticket_summary(session, ticket.ticket_id)
+            self.assertEqual(approved.approval_status, "approved")
+
+    def test_publish_and_list_events(self):
+        with session_scope() as session:
+            ticket = self.ticket_service.create_ticket(session, TicketCreateRequest(title="events"))
+            self.ticket_service.publish_event(
+                session,
+                ticket.ticket_id,
+                event_type="ready",
+                payload={"ok": True},
+            )
+            rows = self.ticket_service.get_ticket_events(session, ticket.ticket_id)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].event_type, "ready")
+
 
 if __name__ == "__main__":
     unittest.main()

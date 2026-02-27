@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Dict
 
+from evercore.db import get_session
 from evercore.agent_runtime import LemlemAgentRuntime
 from evercore.execution import ExecutionResult, TaskExecutor
 from evercore.models import Task, Ticket
+from evercore.repositories import get_unconsumed_ticket_event
+from evercore.time_utils import now_utc
+from evercore.settings import settings
 
 
 class NoopExecutor(TaskExecutor):
@@ -87,6 +92,69 @@ class LemlemAgentJsonExecutor(TaskExecutor):
         )
 
 
+class WaitForEventExecutor(TaskExecutor):
+    def execute(self, ticket: Ticket, task: Task) -> ExecutionResult:
+        payload = dict(task.payload or {})
+        event_type = str(payload.get("event_type") or "").strip()
+        if not event_type:
+            return ExecutionResult(
+                success=False,
+                terminal_failure=True,
+                message="wait_for_event requires payload.event_type",
+            )
+        timeout_seconds = payload.get("timeout_seconds")
+        consume = bool(payload.get("consume", True))
+        defer_seconds = int(payload.get("poll_interval_seconds") or settings.event_wait_poll_interval_seconds)
+
+        session = get_session()
+        try:
+            row = get_unconsumed_ticket_event(
+                session,
+                ticket_id=ticket.ticket_id,
+                event_type=event_type,
+            )
+            if row is not None:
+                if consume:
+                    row.consumed_at = now_utc()
+                    row.consumed_by_task_id = task.id
+                    session.add(row)
+                    session.commit()
+                else:
+                    session.rollback()
+                return ExecutionResult(
+                    success=True,
+                    message=f"received event '{event_type}'",
+                    output={
+                        "event_id": row.id,
+                        "event_type": row.event_type,
+                        "payload": row.payload,
+                        "created_at": row.created_at.isoformat(),
+                    },
+                )
+            session.rollback()
+        finally:
+            session.close()
+
+        if timeout_seconds is not None:
+            started_at = task.created_at or now_utc()
+            timeout_at = started_at + timedelta(seconds=max(int(timeout_seconds), 1))
+            if now_utc() >= timeout_at:
+                return ExecutionResult(
+                    success=False,
+                    terminal_failure=True,
+                    message=f"timed out waiting for event '{event_type}'",
+                    output={"event_type": event_type},
+                )
+
+        return ExecutionResult(
+            success=False,
+            defer=True,
+            defer_seconds=max(1, defer_seconds),
+            message=f"waiting for event '{event_type}'",
+            output={"event_type": event_type},
+        )
+
+
 @dataclass
 class ExecutorRegistry:
     executors: Dict[str, TaskExecutor]
@@ -99,6 +167,7 @@ class ExecutorRegistry:
                 "noop": NoopExecutor(),
                 "lemlem_prompt": LemlemPromptExecutor(runtime),
                 "lemlem_agent_json": LemlemAgentJsonExecutor(runtime),
+                "wait_for_event": WaitForEventExecutor(),
             }
         )
 
