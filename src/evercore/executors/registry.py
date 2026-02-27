@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict
 
-from evergreen_core.agent_runtime import LemlemAgentRuntime
-from evergreen_core.execution import ExecutionResult, TaskExecutor
-from evergreen_core.models import Task, Ticket
+from evercore.agent_runtime import LemlemAgentRuntime
+from evercore.execution import ExecutionResult, TaskExecutor
+from evercore.models import Task, Ticket
 
 
 class NoopExecutor(TaskExecutor):

@@ -1,4 +1,4 @@
-"""Database wiring for standalone evergreen-core."""
+"""Database wiring for standalone evercore."""
 
 from __future__ import annotations
 

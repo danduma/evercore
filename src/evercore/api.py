@@ -1,4 +1,4 @@
-"""Standalone evergreen-core FastAPI application."""
+"""Standalone evercore FastAPI application."""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlmodel import Session
 
-from evergreen_core.db import create_db_and_tables, get_session
-from evergreen_core.executors import ExecutorRegistry
-from evergreen_core.schemas import TaskCreateRequest, TicketCreateRequest, TicketSummary, WorkerRunResponse
-from evergreen_core.services import TicketService, WorkerService
-from evergreen_core.settings import settings
-from evergreen_core.workflow_definitions import WorkflowLoader
+from evercore.db import create_db_and_tables, get_session
+from evercore.executors import ExecutorRegistry
+from evercore.schemas import TaskCreateRequest, TicketCreateRequest, TicketSummary, WorkerRunResponse
+from evercore.services import TicketService, WorkerService
+from evercore.settings import settings
+from evercore.workflow import WorkflowLoader
 
-app = FastAPI(title="evergreen-core", version="0.1.0")
+app = FastAPI(title="evercore", version="0.1.0")
 
 workflow_loader = WorkflowLoader(settings.workflow_dir_path)
 ticket_service = TicketService(workflow_loader)
@@ -41,7 +41,7 @@ def startup() -> None:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "evergreen-core"}
+    return {"status": "ok", "service": "evercore"}
 
 
 @app.post("/tickets", response_model=TicketSummary, status_code=201)
@@ -102,7 +102,7 @@ def run_worker_once(
 
 def main() -> None:
     uvicorn.run(
-        "evergreen_core.api:app",
+        "evercore.api:app",
         host=settings.api_host,
         port=settings.api_port,
         reload=False,

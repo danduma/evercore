@@ -6,17 +6,17 @@ import uuid
 
 from sqlmodel import Session
 
-from evergreen_core.models import Task, Ticket
-from evergreen_core.repositories import (
+from evercore.models import Task, Ticket
+from evercore.repositories import (
     add_task_dependencies,
     get_ticket_by_ticket_id,
     list_tasks_for_ticket,
     list_tickets,
 )
-from evergreen_core.schemas import TaskCreateRequest, TaskSummary, TicketCreateRequest, TicketSummary
-from evergreen_core.settings import settings
-from evergreen_core.time_utils import coerce_utc, now_utc
-from evergreen_core.workflow_definitions import WorkflowLoader
+from evercore.schemas import TaskCreateRequest, TaskSummary, TicketCreateRequest, TicketSummary
+from evercore.settings import settings
+from evercore.time_utils import coerce_utc, now_utc
+from evercore.workflow import WorkflowLoader
 
 
 class TicketService:

@@ -1,4 +1,4 @@
-"""Repository helpers for standalone evergreen-core entities."""
+"""Repository helpers for standalone evercore entities."""
 
 from __future__ import annotations
 

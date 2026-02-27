@@ -3,7 +3,7 @@ requires = ["hatchling>=1.21"]
 build-backend = "hatchling.build"
 
 [project]
-name = "evergreen-core"
+name = "evercore"
 version = "0.1.0"
 description = "Standalone generic ticket/task/worker engine with workflow execution"
 requires-python = ">=3.12"
@@ -19,14 +19,14 @@ dependencies = [
 ]
 
 [project.scripts]
-evergreen-core-api = "evergreen_core.api:main"
-evergreen-core-worker = "evergreen_core.worker:main"
+evercore-api = "evercore.api:main"
+evercore-worker = "evercore.worker:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/evergreen_core"]
+packages = ["src/evercore"]
 
 [tool.uv.sources]
-lemlem = { path = "../libs/lemlem" }
+lemlem = { workspace = true }
 
 [tool.ruff]
 ignore = ["E501"]

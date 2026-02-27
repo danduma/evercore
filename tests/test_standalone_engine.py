@@ -5,21 +5,21 @@ from pathlib import Path
 
 # Configure env before importing project modules
 _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-os.environ["EVERGREEN_CORE_DATABASE_URL"] = f"sqlite:///{_tmp_db.name}"
-os.environ["EVERGREEN_CORE_WORKFLOW_DIR"] = str((Path(__file__).resolve().parents[1] / "workflows").resolve())
+os.environ["EVERCORE_DATABASE_URL"] = f"sqlite:///{_tmp_db.name}"
+os.environ["EVERCORE_WORKFLOW_DIR"] = str((Path(__file__).resolve().parents[1] / "workflows").resolve())
 
-from evergreen_core.db import create_db_and_tables, session_scope  # noqa: E402
-from evergreen_core.executors import ExecutorRegistry  # noqa: E402
-from evergreen_core.schemas import TaskCreateRequest, TicketCreateRequest  # noqa: E402
-from evergreen_core.services import TicketService, WorkerService  # noqa: E402
-from evergreen_core.workflow_definitions import WorkflowLoader  # noqa: E402
+from evercore.db import create_db_and_tables, session_scope  # noqa: E402
+from evercore.executors import ExecutorRegistry  # noqa: E402
+from evercore.schemas import TaskCreateRequest, TicketCreateRequest  # noqa: E402
+from evercore.services import TicketService, WorkerService  # noqa: E402
+from evercore.workflow import WorkflowLoader  # noqa: E402
 
 
 class StandaloneEngineTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         create_db_and_tables()
-        workflow_loader = WorkflowLoader(Path(os.environ["EVERGREEN_CORE_WORKFLOW_DIR"]))
+        workflow_loader = WorkflowLoader(Path(os.environ["EVERCORE_WORKFLOW_DIR"]))
         cls.ticket_service = TicketService(workflow_loader)
         cls.worker_service = WorkerService(ExecutorRegistry.default())
 

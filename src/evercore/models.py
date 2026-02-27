@@ -1,4 +1,4 @@
-"""SQLModel entities for standalone evergreen-core."""
+"""SQLModel entities for standalone evercore."""
 
 from __future__ import annotations
 

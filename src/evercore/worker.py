@@ -1,14 +1,14 @@
-"""Standalone evergreen-core worker loop."""
+"""Standalone evercore worker loop."""
 
 from __future__ import annotations
 
 import logging
 import time
 
-from evergreen_core.db import create_db_and_tables, session_scope
-from evergreen_core.executors import ExecutorRegistry
-from evergreen_core.services import WorkerService
-from evergreen_core.settings import settings
+from evercore.db import create_db_and_tables, session_scope
+from evercore.executors import ExecutorRegistry
+from evercore.services import WorkerService
+from evercore.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ def main() -> None:
     create_db_and_tables()
 
     service = WorkerService(ExecutorRegistry.default())
-    logger.info("starting evergreen-core worker: %s", settings.worker_id)
+    logger.info("starting evercore worker: %s", settings.worker_id)
 
     while True:
         try:

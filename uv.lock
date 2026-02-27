@@ -249,7 +249,7 @@ wheels = [
 ]
 
 [[package]]
-name = "evergreen-core"
+name = "evercore"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

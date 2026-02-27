@@ -4,17 +4,23 @@ from __future__ import annotations
 
 from sqlmodel import Session, select
 
-from evergreen_core.executors import ExecutorRegistry
-from evergreen_core.models import Task, Ticket
-from evergreen_core.repositories import add_task_log, get_task, get_ticket_by_ticket_id, list_dependencies, update_heartbeat
-from evergreen_core.schemas import WorkerRunResponse
-from evergreen_core.settings import settings
-from evergreen_core.time_utils import now_utc
+from evercore.executors import ExecutorRegistry
+from evercore.models import Task, Ticket
+from evercore.repositories import add_task_log, get_task, get_ticket_by_ticket_id, list_dependencies, update_heartbeat
+from evercore.schemas import WorkerRunResponse
+from evercore.settings import settings
+from evercore.services.state_policy import DefaultTicketStatePolicy, TicketStatePolicy
+from evercore.time_utils import now_utc
 
 
 class WorkerService:
-    def __init__(self, executor_registry: ExecutorRegistry):
+    def __init__(
+        self,
+        executor_registry: ExecutorRegistry,
+        ticket_state_policy: TicketStatePolicy | None = None,
+    ):
         self.executor_registry = executor_registry
+        self.ticket_state_policy = ticket_state_policy or DefaultTicketStatePolicy()
 
     def process_once(self, session: Session, worker_id: str | None = None) -> WorkerRunResponse:
         effective_worker_id = worker_id or settings.worker_id
@@ -114,29 +120,9 @@ class WorkerService:
         tasks = list(session.exec(statement).all())
 
         ticket.updated_at = now_utc()
-        if not tasks:
-            ticket.stage = "queued"
-            ticket.status = "active"
-            ticket.completed_at = None
-            session.add(ticket)
-            return
-
-        any_failed = any(task.state == "failed" for task in tasks)
-        any_running = any(task.state == "running" for task in tasks)
-        any_queued = any(task.state == "queued" for task in tasks)
-        all_completed = all(task.state == "completed" for task in tasks)
-
-        if any_failed:
-            ticket.stage = "review"
-            ticket.status = "attention"
-            ticket.completed_at = None
-        elif all_completed:
-            ticket.stage = "finished"
-            ticket.status = "completed"
-            ticket.completed_at = now_utc()
-        elif any_running or any_queued:
-            ticket.stage = "running"
-            ticket.status = "active"
-            ticket.completed_at = None
+        resolved = self.ticket_state_policy.resolve(ticket, tasks)
+        ticket.stage = resolved.stage
+        ticket.status = resolved.status
+        ticket.completed_at = resolved.completed_at
 
         session.add(ticket)

@@ -1,4 +1,4 @@
-# evergreen-core (Standalone)
+# evercore (Standalone)
 
 A fully standalone, generic engine for:
 - ticket lifecycle management
@@ -21,9 +21,9 @@ It does not import `backend/`, `workers/`, or `libs/shared`.
 1. Configure environment:
 ```bash
 cp .env.example .env 2>/dev/null || true
-export EVERGREEN_CORE_DATABASE_URL="sqlite:///./evergreen_core.db"
-export EVERGREEN_CORE_WORKFLOW_DIR="./workflows"
-export EVERGREEN_CORE_DEFAULT_WORKFLOW_KEY="default_ticket"
+export EVERCORE_DATABASE_URL="sqlite:///./evercore.db"
+export EVERCORE_WORKFLOW_DIR="./workflows"
+export EVERCORE_DEFAULT_WORKFLOW_KEY="default_ticket"
 ```
 
 2. Configure lemlem models:
@@ -33,13 +33,13 @@ export LEMLEM_MODELS_CONFIG_PATH="/abs/path/to/models_config.yaml"
 
 3. Install and run API:
 ```bash
-uv sync --project evergreen-core
-uv run --project evergreen-core evergreen-core-api
+uv sync --project evercore
+uv run --project evercore evercore-api
 ```
 
 4. Run worker in a second terminal:
 ```bash
-uv run --project evergreen-core evergreen-core-worker
+uv run --project evercore evercore-worker
 ```
 
 5. Create a ticket:
@@ -65,7 +65,7 @@ curl -s -X POST http://localhost:8010/tickets/<ticket_id>/tasks \
 ## Extending for a new project
 1. Add a workflow YAML in `workflows/`
 2. Define your own task keys in your app layer
-3. Register custom executors in `evergreen_core/executors/registry.py`
+3. Register custom executors in `evercore/executors/registry.py`
 4. Create tickets/tasks through the API
 
 ## Notes

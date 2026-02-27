@@ -1,4 +1,4 @@
-"""API schemas for standalone evergreen-core."""
+"""API schemas for standalone evercore."""
 
 from __future__ import annotations
 

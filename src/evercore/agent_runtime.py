@@ -1,4 +1,4 @@
-"""Lemlem-first agent runtime for standalone evergreen-core."""
+"""Lemlem-first agent runtime for standalone evercore."""
 
 from __future__ import annotations
 

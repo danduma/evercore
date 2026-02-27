@@ -1,6 +1,6 @@
 key: default_ticket
 version: 1.0.0
-description: Generic ticket lifecycle for standalone evergreen-core
+description: Generic ticket lifecycle for standalone evercore
 initial_stage: queued
 workspace_type: none
 stages:
