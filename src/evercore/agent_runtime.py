@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from lemlem import LLMClient
-from lemlem.adapter import LLMAdapter, MODEL_DATA
+import lemlem.adapter as lemlem_adapter
+from lemlem.adapter import LLMAdapter
 
 from .settings import settings
 
@@ -26,8 +27,18 @@ class LemlemAgentRuntime:
     """Central foundation for all agent execution via lemlem."""
 
     def __init__(self) -> None:
-        self.client = LLMClient(MODEL_DATA)
-        self.adapter = LLMAdapter(model_data=MODEL_DATA, client=self.client)
+        lemlem_adapter._refresh_model_data()
+        self._client_model_timestamp = lemlem_adapter._MODEL_DATA_TIMESTAMP
+        self.client = LLMClient(lemlem_adapter.MODEL_DATA)
+        # Let LLMAdapter own refresh behavior so DB/YAML config changes propagate.
+        self.adapter = LLMAdapter()
+
+    def _get_client(self) -> LLMClient:
+        lemlem_adapter._refresh_model_data()
+        if self._client_model_timestamp != lemlem_adapter._MODEL_DATA_TIMESTAMP:
+            self.client = LLMClient(lemlem_adapter.MODEL_DATA)
+            self._client_model_timestamp = lemlem_adapter._MODEL_DATA_TIMESTAMP
+        return self.client
 
     def run_prompt(
         self,
@@ -43,7 +54,7 @@ class LemlemAgentRuntime:
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
-            result = self.client.generate(
+            result = self._get_client().generate(
                 model=selected_model,
                 messages=messages,
                 temperature=temperature,
