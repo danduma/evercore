@@ -56,6 +56,8 @@ uv run --project evercore evercore-api
 uv run --project evercore evercore-worker
 ```
 
+`EVERCORE_WORKER_ID` is optional. If unset, Evercore now generates a process-unique default (`evercore-worker-<hostname>-<pid>`). For multi-container deployments, explicitly setting a stable unique worker id per container is still recommended.
+
 1. Create a ticket:
 
 ```bash
@@ -92,12 +94,15 @@ Run a subset by pattern:
 uv run --project libs/evercore evercore-test --pattern "test_worker*.py"
 ```
 
+If you run Evercore outside this monorepo, ensure the `lemlem` dependency is resolvable (for example from your package index, or by adding a local/path source in your own `pyproject.toml`).
+
 ## Extending for a new project
 
 1. Add a workflow YAML in `workflows/`
 2. Define your own task keys in your app layer
 3. Register custom executors in `evercore/executors/registry.py`
 4. Create tickets/tasks through the API
+5. For long-running custom executors, add `execute_with_control(ticket, task, control)` and check `control.should_stop()` periodically for cooperative pause/cancel support
 
 ## LLM Layer (lemlem)
 
@@ -107,4 +112,3 @@ Evercore uses [lemlem](https://github.com/danduma/lemlem) for model routing and 
 
 - YAML/JSON file (for example via `LEMLEM_MODELS_CONFIG_PATH`)
 - database-backed model config service (dynamic runtime loading)
-

@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import os
+import socket
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
+
+
+def _default_worker_id() -> str:
+    hostname = socket.gethostname().strip() or "host"
+    return f"evercore-worker-{hostname}-{os.getpid()}"
 
 
 class Settings(BaseSettings):
@@ -14,7 +22,7 @@ class Settings(BaseSettings):
     workflow_dir: str = "./workflows"
     default_workflow_key: str = "default_ticket"
     worker_poll_interval_seconds: float = 2.0
-    worker_id: str = "evercore-worker-1"
+    worker_id: str = Field(default_factory=_default_worker_id)
     task_lease_seconds: int = 300
     stale_task_timeout_seconds: int = 900
     default_max_attempts: int = 3

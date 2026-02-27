@@ -1,5 +1,6 @@
 import unittest
 from datetime import timedelta
+import threading
 
 from sqlmodel import select
 
@@ -35,6 +36,18 @@ class _DeferExecutor(TaskExecutor):
             defer_seconds=1,
             message="waiting for external signal",
         )
+
+
+class _BlockingSuccessExecutor(TaskExecutor):
+    def __init__(self, started_event: threading.Event, finish_event: threading.Event):
+        self._started_event = started_event
+        self._finish_event = finish_event
+
+    def execute(self, ticket, task):
+        del ticket, task
+        self._started_event.set()
+        self._finish_event.wait(timeout=5)
+        return ExecutionResult(success=True, message="ok")
 
 
 class WorkerServiceTests(unittest.TestCase):
@@ -178,6 +191,61 @@ class WorkerServiceTests(unittest.TestCase):
             self.assertEqual(row.state, "retrying")
             self.assertEqual(row.attempt_count, 0)
             self.assertIsNotNone(row.next_run_at)
+
+    def test_multi_worker_contention_does_not_double_claim_single_task(self):
+        started_event = threading.Event()
+        finish_event = threading.Event()
+        service = WorkerService(
+            ExecutorRegistry(
+                executors={
+                    "blocking": _BlockingSuccessExecutor(started_event, finish_event)
+                }
+            )
+        )
+        with session_scope() as session:
+            ticket = self.ticket_service.create_ticket(session, TicketCreateRequest(title="contention"))
+            task = self.ticket_service.create_task(
+                session,
+                ticket.ticket_id,
+                TaskCreateRequest(task_key="blocking"),
+            )
+            task_id = task.id
+
+        results = {}
+
+        def run_worker(worker_name: str, slot: str) -> None:
+            with session_scope() as session:
+                results[slot] = service.process_once(session, worker_id=worker_name)
+
+        worker_one = threading.Thread(
+            target=run_worker,
+            args=("worker-contention-1", "first"),
+            daemon=True,
+        )
+        worker_two = threading.Thread(
+            target=run_worker,
+            args=("worker-contention-2", "second"),
+            daemon=True,
+        )
+
+        worker_one.start()
+        self.assertTrue(started_event.wait(timeout=2), "first worker never started execution")
+        worker_two.start()
+        worker_two.join(timeout=3)
+        self.assertFalse(worker_two.is_alive(), "second worker did not finish")
+
+        finish_event.set()
+        worker_one.join(timeout=3)
+        self.assertFalse(worker_one.is_alive(), "first worker did not finish")
+
+        self.assertTrue(results["first"].processed)
+        self.assertFalse(results["second"].processed)
+        self.assertEqual(results["second"].message, "no queued task")
+
+        with session_scope() as session:
+            row = session.exec(select(Task).where(Task.id == task_id)).first()
+            self.assertEqual(row.state, "completed")
+            self.assertEqual(row.attempt_count, 1)
 
     def test_retry_policy_uses_task_overrides(self):
         service = WorkerService(ExecutorRegistry(executors={"always_fail": _FailExecutor()}))
