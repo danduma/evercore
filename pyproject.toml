@@ -21,6 +21,7 @@ dependencies = [
 [project.scripts]
 evercore-api = "evercore.api:main"
 evercore-worker = "evercore.worker:main"
+evercore-test = "evercore.test_runner:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/evercore"]

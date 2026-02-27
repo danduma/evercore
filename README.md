@@ -10,6 +10,14 @@ A fully standalone, generic engine for:
 This codebase is intentionally separate from Evergreen app internals.
 It does not import `backend/`, `workers/`, or `libs/shared`.
 
+## LLM Layer (lemlem)
+
+Evercore uses [lemlem](https://github.com/danduma/lemlem) for model routing and LLM calls.
+
+`lemlem` supports two model/preset configuration sources:
+- YAML/JSON file (for example via `LEMLEM_MODELS_CONFIG_PATH`)
+- database-backed model config service (dynamic runtime loading)
+
 ## Why this is separate
 - Independent `pyproject.toml`
 - Independent models/storage/services/API
@@ -30,6 +38,8 @@ export EVERCORE_DEFAULT_WORKFLOW_KEY="default_ticket"
 ```bash
 export LEMLEM_MODELS_CONFIG_PATH="/abs/path/to/models_config.yaml"
 ```
+
+Or configure a database-backed model config source for dynamic model/preset updates.
 
 3. Install and run API:
 ```bash
@@ -60,6 +70,20 @@ curl -s -X POST http://localhost:8010/tickets/<ticket_id>/tasks \
       "prompt":"Write a short test summary for this ticket"
     }
   }'
+```
+
+## Tests (evercore library only)
+
+Run the full standalone Evercore library suite:
+
+```bash
+uv run --project libs/evercore evercore-test
+```
+
+Run a subset by pattern:
+
+```bash
+uv run --project libs/evercore evercore-test --pattern "test_worker*.py"
 ```
 
 ## Extending for a new project

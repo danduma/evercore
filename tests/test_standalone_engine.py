@@ -1,11 +1,9 @@
 import os
-import tempfile
 import unittest
 from pathlib import Path
 
-# Configure env before importing project modules
-_tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-os.environ["EVERCORE_DATABASE_URL"] = f"sqlite:///{_tmp_db.name}"
+from _test_support import reset_database
+
 os.environ["EVERCORE_WORKFLOW_DIR"] = str((Path(__file__).resolve().parents[1] / "workflows").resolve())
 
 from evercore.db import create_db_and_tables, session_scope  # noqa: E402
@@ -22,6 +20,9 @@ class StandaloneEngineTests(unittest.TestCase):
         workflow_loader = WorkflowLoader(Path(os.environ["EVERCORE_WORKFLOW_DIR"]))
         cls.ticket_service = TicketService(workflow_loader)
         cls.worker_service = WorkerService(ExecutorRegistry.default())
+
+    def setUp(self):
+        reset_database()
 
     def test_ticket_task_worker_flow_with_noop(self):
         with session_scope() as session:
