@@ -1,0 +1,21 @@
+key: default_ticket
+version: 1.0.0
+description: Generic ticket lifecycle for standalone evergreen-core
+initial_stage: queued
+workspace_type: none
+stages:
+  - id: queued
+    executor: queue_manager
+    transitions:
+      - target: running
+  - id: running
+    executor: task_runner
+    transitions:
+      - target: review
+  - id: review
+    executor: reviewer
+    transitions:
+      - target: finished
+  - id: finished
+    executor: terminal
+    transitions: []
