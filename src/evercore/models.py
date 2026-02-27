@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, Dict
 
 from sqlalchemy import Column, JSON, Text
 from sqlmodel import Field, SQLModel
@@ -19,7 +19,7 @@ class Ticket(SQLModel, table=True):
     title: Optional[str] = None
     workflow_key: str = Field(default="default_ticket", index=True)
     workflow_version: Optional[str] = None
-    workflow_input: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    workflow_input: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     stage: str = Field(default="queued", index=True)
     status: str = Field(default="active", index=True)
     paused: bool = Field(default=False, index=True)
@@ -31,7 +31,7 @@ class Ticket(SQLModel, table=True):
     approval_decided_at: Optional[datetime] = Field(default=None)
     approval_notes: Optional[str] = Field(default=None, sa_column=Column(Text))
     source_type: Optional[str] = None
-    context_data: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    context_data: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=now_utc)
     updated_at: datetime = Field(default_factory=now_utc)
     completed_at: Optional[datetime] = None
@@ -44,8 +44,8 @@ class Task(SQLModel, table=True):
     ticket_id: str = Field(index=True, foreign_key="tickets.ticket_id")
     task_key: str = Field(index=True)
     state: str = Field(default="queued", index=True)
-    payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    result_data: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    payload: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    result_data: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     error_message: Optional[str] = Field(default=None, sa_column=Column(Text))
     cancel_requested: bool = Field(default=False, index=True)
     cancel_requested_at: Optional[datetime] = Field(default=None)
@@ -80,7 +80,7 @@ class TaskLog(SQLModel, table=True):
     task_id: int = Field(index=True, foreign_key="tasks.id")
     log_type: str = Field(default="info", index=True)
     message: str = Field(sa_column=Column(Text))
-    details: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    details: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     success: Optional[bool] = None
     created_at: datetime = Field(default_factory=now_utc)
 
@@ -101,7 +101,7 @@ class TicketEvent(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     ticket_id: str = Field(index=True, foreign_key="tickets.ticket_id")
     event_type: str = Field(index=True)
-    payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    payload: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     consumed_at: Optional[datetime] = Field(default=None, index=True)
     consumed_by_task_id: Optional[int] = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=now_utc, index=True)
@@ -118,11 +118,11 @@ class TicketSchedule(SQLModel, table=True):
     ticket_title: Optional[str] = None
     workflow_key: Optional[str] = Field(default=None, index=True)
     workflow_version: Optional[str] = None
-    workflow_input: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    context_data: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    workflow_input: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    context_data: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     source_type: Optional[str] = None
     task_key: Optional[str] = Field(default=None, index=True)
-    task_payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    task_payload: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     task_max_attempts: Optional[int] = Field(default=None)
     last_run_at: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=now_utc)
