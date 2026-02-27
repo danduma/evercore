@@ -1,28 +1,16 @@
-# evercore (Standalone)
+# Evercore: Orchestration Engine for AI Agents and Complex Workflows
 
-A fully standalone, generic engine for:
-- ticket lifecycle management
-- task orchestration and dependency handling
-- worker claiming/execution loops
-- workflow definitions via YAML
-- pluggable task executors (including `lemlem`)
+[![Python](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/License-AGPL-yellow.svg)](https://opensource.org/licenses/AGPL)
 
-This codebase is intentionally separate from Evergreen app internals.
-It does not import `backend/`, `workers/`, or `libs/shared`.
+📢 [[Basic Local Deployment](../../examples/01-basic-local)] [[External Postgres Deployment](../../examples/02-external-postgres)] [[Production VPS Deployment](../../examples/03-production-vps)]
 
-## LLM Layer (lemlem)
+**Evercore** is an orchestration engine for managing long-running LLM agents.
 
-Evercore uses [lemlem](https://github.com/danduma/lemlem) for model routing and LLM calls.
+It manages ticket lifecycles, task dependencies, and distributed worker loops for you.
 
-`lemlem` supports two model/preset configuration sources:
-- YAML/JSON file (for example via `LEMLEM_MODELS_CONFIG_PATH`)
-- database-backed model config service (dynamic runtime loading)
+By decoupling state management and declarative YAML workflows from your core application logic, Evercore provides a robust, pluggable foundation that significantly simplifies the development and scaling of asynchronous, multi-agent systems.
 
-## Why this is separate
-- Independent `pyproject.toml`
-- Independent models/storage/services/API
-- Independent worker loop and executor registry
-- No runtime dependency on Evergreen backend schemas
 
 ## Quick start
 
@@ -92,6 +80,11 @@ uv run --project libs/evercore evercore-test --pattern "test_worker*.py"
 3. Register custom executors in `evercore/executors/registry.py`
 4. Create tickets/tasks through the API
 
-## Notes
-- All datetimes are timezone-aware using `pytz.UTC`.
-- No DB enums are used (plain text states for flexibility).
+## LLM Layer (lemlem)
+
+Evercore uses [lemlem](https://github.com/danduma/lemlem) for model routing and LLM calls.
+
+`lemlem` supports two model/preset configuration sources:
+- YAML/JSON file (for example via `LEMLEM_MODELS_CONFIG_PATH`)
+- database-backed model config service (dynamic runtime loading)
+
