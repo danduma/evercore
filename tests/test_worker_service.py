@@ -1,6 +1,8 @@
 import unittest
 from datetime import timedelta
 import threading
+import time
+from unittest.mock import patch
 
 from sqlmodel import select
 
@@ -48,6 +50,16 @@ class _BlockingSuccessExecutor(TaskExecutor):
         self._started_event.set()
         self._finish_event.wait(timeout=5)
         return ExecutionResult(success=True, message="ok")
+
+
+class _SlowExecutor(TaskExecutor):
+    def __init__(self, delay_seconds: float):
+        self._delay_seconds = delay_seconds
+
+    def execute(self, ticket, task):
+        del ticket, task
+        time.sleep(self._delay_seconds)
+        return ExecutionResult(success=True, message="slow-ok")
 
 
 class WorkerServiceTests(unittest.TestCase):
@@ -270,6 +282,81 @@ class WorkerServiceTests(unittest.TestCase):
             self.assertEqual(row.state, "retrying")
             delta = coerce_utc(row.next_run_at) - now_utc()
             self.assertLessEqual(delta.total_seconds(), 2.5)
+
+    def test_execution_timeout_is_enforced_in_worker_service(self):
+        service = WorkerService(ExecutorRegistry(executors={"slow": _SlowExecutor(2.0)}))
+        with session_scope() as session:
+            ticket = self.ticket_service.create_ticket(session, TicketCreateRequest(title="timeout"))
+            task = self.ticket_service.create_task(
+                session,
+                ticket.ticket_id,
+                TaskCreateRequest(task_key="slow", timeout_seconds=1, max_attempts=2),
+            )
+            task_id = task.id
+
+        with session_scope() as session:
+            result = service.process_once(session, worker_id="worker-timeout")
+            self.assertTrue(result.processed)
+            row = session.exec(select(Task).where(Task.id == task_id)).first()
+            logs = session.exec(select(TaskLog).where(TaskLog.task_id == task_id)).all()
+            self.assertEqual(row.state, "retrying")
+            self.assertIn("timed out", row.error_message)
+            self.assertTrue(
+                any("timed out" in log.message.lower() for log in logs),
+                f"Expected timeout logs, got: {[log.message for log in logs]}",
+            )
+
+    def test_default_execution_timeout_applies_when_task_timeout_missing(self):
+        service = WorkerService(ExecutorRegistry(executors={"slow": _SlowExecutor(2.0)}))
+        with session_scope() as session:
+            ticket = self.ticket_service.create_ticket(
+                session, TicketCreateRequest(title="default-timeout")
+            )
+            task = self.ticket_service.create_task(
+                session,
+                ticket.ticket_id,
+                TaskCreateRequest(task_key="slow", max_attempts=2),
+            )
+            task_id = task.id
+
+        with patch("evercore.services.worker_service.settings.default_task_timeout_seconds", 1):
+            with session_scope() as session:
+                result = service.process_once(session, worker_id="worker-default-timeout")
+                self.assertTrue(result.processed)
+                row = session.exec(select(Task).where(Task.id == task_id)).first()
+                self.assertEqual(row.state, "retrying")
+                self.assertIn("timed out", row.error_message)
+
+    def test_timeout_recovery_handler_can_complete_task(self):
+        def recovery_handler(ticket, task, executor, timeout_seconds):
+            del ticket, task, executor, timeout_seconds
+            return ExecutionResult(
+                success=True,
+                message="recovered after timeout",
+                output={"recovered": True},
+            )
+
+        service = WorkerService(
+            ExecutorRegistry(executors={"slow": _SlowExecutor(2.0)}),
+            timeout_recovery_handler=recovery_handler,
+        )
+        with session_scope() as session:
+            ticket = self.ticket_service.create_ticket(
+                session, TicketCreateRequest(title="timeout-recovery")
+            )
+            task = self.ticket_service.create_task(
+                session,
+                ticket.ticket_id,
+                TaskCreateRequest(task_key="slow", timeout_seconds=1, max_attempts=2),
+            )
+            task_id = task.id
+
+        with session_scope() as session:
+            result = service.process_once(session, worker_id="worker-timeout-recovery")
+            self.assertTrue(result.processed)
+            row = session.exec(select(Task).where(Task.id == task_id)).first()
+            self.assertEqual(row.state, "completed")
+            self.assertEqual(row.result_data.get("recovered"), True)
 
 
 if __name__ == "__main__":
