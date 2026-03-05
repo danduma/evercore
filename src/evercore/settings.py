@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     worker_poll_interval_seconds: float = 2.0
     worker_id: str = Field(default_factory=_default_worker_id)
     task_lease_seconds: int = 300
+    default_task_timeout_seconds: int = 300
     stale_task_timeout_seconds: int = 900
     default_max_attempts: int = 3
     retry_base_seconds: int = 10

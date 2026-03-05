@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import threading
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
+from typing import Callable
 
 from sqlalchemy import or_
 from sqlmodel import Session, select
 
+from evercore.execution import ExecutionResult, TaskExecutor
 from evercore.executors import ExecutorRegistry
 from evercore.models import Task, Ticket
 from evercore.repositories import (
@@ -31,15 +36,21 @@ from evercore.task_runtime import (
 )
 from evercore.time_utils import coerce_utc, now_utc
 
+logger = logging.getLogger(__name__)
+
 
 class WorkerService:
     def __init__(
         self,
         executor_registry: ExecutorRegistry,
         ticket_state_policy: TicketStatePolicy | None = None,
+        timeout_recovery_handler: (
+            Callable[[Ticket, Task, TaskExecutor, int], ExecutionResult | None] | None
+        ) = None,
     ):
         self.executor_registry = executor_registry
         self.ticket_state_policy = ticket_state_policy or DefaultTicketStatePolicy()
+        self.timeout_recovery_handler = timeout_recovery_handler
 
     def process_once(self, session: Session, worker_id: str | None = None) -> WorkerRunResponse:
         effective_worker_id = worker_id or settings.worker_id
@@ -64,6 +75,17 @@ class WorkerService:
             task_id = int(task.id)
             task_key = str(task.task_key)
             ticket_id = str(task.ticket_id)
+            add_task_log(
+                claim_session,
+                task_id=task_id,
+                log_type="info",
+                message="task claimed by worker",
+                details={
+                    "worker_id": effective_worker_id,
+                    "task_key": task_key,
+                },
+                success=None,
+            )
             update_heartbeat(claim_session, effective_worker_id, "working", task_id)
             claim_session.commit()
 
@@ -153,17 +175,43 @@ class WorkerService:
         lease_thread.start()
         result = None
         raised_exc: Exception | None = None
+        timed_out_seconds: int | None = None
         try:
             execute_with_control = getattr(executor, "execute_with_control", None)
-            if callable(execute_with_control):
-                control = TaskControl(
-                    session_factory=lambda: Session(bind=bind, expire_on_commit=False),
-                    task_id=task_id,
-                    ticket_id=ticket_id,
-                )
-                result = execute_with_control(ticket, task_for_exec, control)
+            execution_timeout_seconds = self._task_timeout_seconds(task_for_exec)
+
+            def _execute_task():
+                if callable(execute_with_control):
+                    control = TaskControl(
+                        session_factory=lambda: Session(bind=bind, expire_on_commit=False),
+                        task_id=task_id,
+                        ticket_id=ticket_id,
+                    )
+                    return execute_with_control(ticket, task_for_exec, control)
+                return executor.execute(ticket, task_for_exec)
+
+            if execution_timeout_seconds is None:
+                result = _execute_task()
             else:
-                result = executor.execute(ticket, task_for_exec)
+                executor_pool = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix=f"evercore-task-{task_id}",
+                )
+                try:
+                    future = executor_pool.submit(_execute_task)
+                    result = future.result(timeout=execution_timeout_seconds)
+                except FutureTimeoutError:
+                    timed_out_seconds = execution_timeout_seconds
+                    raised_exc = TimeoutError(
+                        f"task timed out after {execution_timeout_seconds}s"
+                    )
+                    logger.warning(
+                        "Task %s timed out after %ss",
+                        task_id,
+                        execution_timeout_seconds,
+                    )
+                finally:
+                    executor_pool.shutdown(wait=False, cancel_futures=True)
         except Exception as exc:  # noqa: BLE001
             raised_exc = exc
         finally:
@@ -195,7 +243,71 @@ class WorkerService:
                     message=f"missing ticket: {ticket_id}",
                 )
 
+            if (
+                raised_exc is not None
+                and timed_out_seconds is not None
+                and self.timeout_recovery_handler is not None
+            ):
+                add_task_log(
+                    finalize_session,
+                    task_id=live_task.id,
+                    log_type="info",
+                    message="attempting timeout recovery handler",
+                    details={
+                        "timeout_seconds": timed_out_seconds,
+                        "worker_id": effective_worker_id,
+                        "task_key": live_task.task_key,
+                    },
+                    success=None,
+                )
+                try:
+                    recovered = self.timeout_recovery_handler(
+                        live_ticket, live_task, executor, timed_out_seconds
+                    )
+                    if recovered is not None:
+                        add_task_log(
+                            finalize_session,
+                            task_id=live_task.id,
+                            log_type="info",
+                            message="timeout recovery handler returned a result",
+                            details={
+                                "result_success": bool(getattr(recovered, "success", False)),
+                                "result_message": getattr(recovered, "message", ""),
+                            },
+                            success=None,
+                        )
+                        result = recovered
+                        raised_exc = None
+                    else:
+                        add_task_log(
+                            finalize_session,
+                            task_id=live_task.id,
+                            log_type="warning",
+                            message="timeout recovery handler returned no result",
+                            success=False,
+                        )
+                except Exception as recovery_exc:  # noqa: BLE001
+                    add_task_log(
+                        finalize_session,
+                        task_id=live_task.id,
+                        log_type="warning",
+                        message=f"timeout recovery handler raised: {recovery_exc}",
+                        success=False,
+                    )
+
             if raised_exc is not None:
+                if timed_out_seconds is not None:
+                    add_task_log(
+                        finalize_session,
+                        task_id=live_task.id,
+                        log_type="warning",
+                        message=f"task execution timed out after {timed_out_seconds}s",
+                        details={
+                            "timeout_seconds": timed_out_seconds,
+                            "worker_id": effective_worker_id,
+                        },
+                        success=False,
+                    )
                 response = self._finalize_retry_or_dead_letter(
                     finalize_session,
                     live_task,
@@ -508,13 +620,30 @@ class WorkerService:
 
     @staticmethod
     def _task_timeout_exceeded(now, task: Task) -> bool:
-        timeout_seconds = task.timeout_seconds
-        if timeout_seconds is None or task.started_at is None:
+        if task.started_at is None:
+            return False
+        timeout_seconds = WorkerService._task_timeout_seconds(task)
+        if timeout_seconds is None:
             return False
         started_at = coerce_utc(task.started_at)
         if started_at is None:
             return False
-        return (now - started_at).total_seconds() >= max(int(timeout_seconds), 1)
+        return (now - started_at).total_seconds() >= timeout_seconds
+
+    @staticmethod
+    def _task_timeout_seconds(task: Task) -> int | None:
+        raw_timeout = task.timeout_seconds
+        if raw_timeout is None:
+            raw_timeout = settings.default_task_timeout_seconds
+        if raw_timeout is None:
+            return None
+        try:
+            parsed = int(raw_timeout)
+        except (TypeError, ValueError):
+            return None
+        if parsed <= 0:
+            return None
+        return parsed
 
     def _lease_renewer_loop(
         self,
