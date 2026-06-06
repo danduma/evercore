@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional
 
+import lemlem
 from lemlem import LLMClient
-import lemlem.adapter as lemlem_adapter
 from lemlem.adapter import LLMAdapter
 
 from .settings import settings
@@ -27,18 +27,12 @@ class LemlemAgentRuntime:
     """Central foundation for all agent execution via lemlem."""
 
     def __init__(self) -> None:
-        lemlem_adapter._refresh_model_data()
-        self._client_model_timestamp = lemlem_adapter._MODEL_DATA_TIMESTAMP
-        self.client = LLMClient(lemlem_adapter.MODEL_DATA)
         # Let LLMAdapter own refresh behavior so DB/YAML config changes propagate.
         self.adapter = LLMAdapter()
 
     def _get_client(self) -> LLMClient:
-        lemlem_adapter._refresh_model_data()
-        if self._client_model_timestamp != lemlem_adapter._MODEL_DATA_TIMESTAMP:
-            self.client = LLMClient(lemlem_adapter.MODEL_DATA)
-            self._client_model_timestamp = lemlem_adapter._MODEL_DATA_TIMESTAMP
-        return self.client
+        # Shared, auto-refreshing client owned by lemlem (T4.1).
+        return lemlem.get_client()
 
     def run_prompt(
         self,
