@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from concurrent.futures import TimeoutError as FutureTimeoutError
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from typing import Callable
 
@@ -175,10 +173,8 @@ class WorkerService:
         lease_thread.start()
         result = None
         raised_exc: Exception | None = None
-        timed_out_seconds: int | None = None
         try:
             execute_with_control = getattr(executor, "execute_with_control", None)
-            execution_timeout_seconds = self._task_timeout_seconds(task_for_exec)
 
             def _execute_task():
                 if callable(execute_with_control):
@@ -190,28 +186,7 @@ class WorkerService:
                     return execute_with_control(ticket, task_for_exec, control)
                 return executor.execute(ticket, task_for_exec)
 
-            if execution_timeout_seconds is None:
-                result = _execute_task()
-            else:
-                executor_pool = ThreadPoolExecutor(
-                    max_workers=1,
-                    thread_name_prefix=f"evercore-task-{task_id}",
-                )
-                try:
-                    future = executor_pool.submit(_execute_task)
-                    result = future.result(timeout=execution_timeout_seconds)
-                except FutureTimeoutError:
-                    timed_out_seconds = execution_timeout_seconds
-                    raised_exc = TimeoutError(
-                        f"task timed out after {execution_timeout_seconds}s"
-                    )
-                    logger.warning(
-                        "Task %s timed out after %ss",
-                        task_id,
-                        execution_timeout_seconds,
-                    )
-                finally:
-                    executor_pool.shutdown(wait=False, cancel_futures=True)
+            result = _execute_task()
         except Exception as exc:  # noqa: BLE001
             raised_exc = exc
         finally:
@@ -243,71 +218,7 @@ class WorkerService:
                     message=f"missing ticket: {ticket_id}",
                 )
 
-            if (
-                raised_exc is not None
-                and timed_out_seconds is not None
-                and self.timeout_recovery_handler is not None
-            ):
-                add_task_log(
-                    finalize_session,
-                    task_id=live_task.id,
-                    log_type="info",
-                    message="attempting timeout recovery handler",
-                    details={
-                        "timeout_seconds": timed_out_seconds,
-                        "worker_id": effective_worker_id,
-                        "task_key": live_task.task_key,
-                    },
-                    success=None,
-                )
-                try:
-                    recovered = self.timeout_recovery_handler(
-                        live_ticket, live_task, executor, timed_out_seconds
-                    )
-                    if recovered is not None:
-                        add_task_log(
-                            finalize_session,
-                            task_id=live_task.id,
-                            log_type="info",
-                            message="timeout recovery handler returned a result",
-                            details={
-                                "result_success": bool(getattr(recovered, "success", False)),
-                                "result_message": getattr(recovered, "message", ""),
-                            },
-                            success=None,
-                        )
-                        result = recovered
-                        raised_exc = None
-                    else:
-                        add_task_log(
-                            finalize_session,
-                            task_id=live_task.id,
-                            log_type="warning",
-                            message="timeout recovery handler returned no result",
-                            success=False,
-                        )
-                except Exception as recovery_exc:  # noqa: BLE001
-                    add_task_log(
-                        finalize_session,
-                        task_id=live_task.id,
-                        log_type="warning",
-                        message=f"timeout recovery handler raised: {recovery_exc}",
-                        success=False,
-                    )
-
             if raised_exc is not None:
-                if timed_out_seconds is not None:
-                    add_task_log(
-                        finalize_session,
-                        task_id=live_task.id,
-                        log_type="warning",
-                        message=f"task execution timed out after {timed_out_seconds}s",
-                        details={
-                            "timeout_seconds": timed_out_seconds,
-                            "worker_id": effective_worker_id,
-                        },
-                        success=False,
-                    )
                 response = self._finalize_retry_or_dead_letter(
                     finalize_session,
                     live_task,
@@ -686,14 +597,6 @@ class WorkerService:
                 return
 
             for task in stale_tasks:
-                if self._task_timeout_exceeded(now, task):
-                    task.attempt_count = int(task.attempt_count or 0) + 1
-                    self._finalize_retry_or_dead_letter(
-                        session,
-                        task,
-                        message=f"task timed out after {task.timeout_seconds}s",
-                    )
-                    continue
                 if not is_stale_running_task(
                     now,
                     lease_expires_at_value=task.lease_expires_at,

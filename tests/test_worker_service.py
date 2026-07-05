@@ -283,10 +283,12 @@ class WorkerServiceTests(unittest.TestCase):
             delta = coerce_utc(row.next_run_at) - now_utc()
             self.assertLessEqual(delta.total_seconds(), 2.5)
 
-    def test_execution_timeout_is_enforced_in_worker_service(self):
-        service = WorkerService(ExecutorRegistry(executors={"slow": _SlowExecutor(2.0)}))
+    def test_task_timeout_does_not_interrupt_running_executor(self):
+        service = WorkerService(ExecutorRegistry(executors={"slow": _SlowExecutor(1.2)}))
         with session_scope() as session:
-            ticket = self.ticket_service.create_ticket(session, TicketCreateRequest(title="timeout"))
+            ticket = self.ticket_service.create_ticket(
+                session, TicketCreateRequest(title="timeout-is-metadata")
+            )
             task = self.ticket_service.create_task(
                 session,
                 ticket.ticket_id,
@@ -295,22 +297,21 @@ class WorkerServiceTests(unittest.TestCase):
             task_id = task.id
 
         with session_scope() as session:
-            result = service.process_once(session, worker_id="worker-timeout")
+            result = service.process_once(session, worker_id="worker-timeout-metadata")
             self.assertTrue(result.processed)
             row = session.exec(select(Task).where(Task.id == task_id)).first()
             logs = session.exec(select(TaskLog).where(TaskLog.task_id == task_id)).all()
-            self.assertEqual(row.state, "retrying")
-            self.assertIn("timed out", row.error_message)
-            self.assertTrue(
+            self.assertEqual(row.state, "completed")
+            self.assertFalse(
                 any("timed out" in log.message.lower() for log in logs),
-                f"Expected timeout logs, got: {[log.message for log in logs]}",
+                f"Did not expect timeout logs, got: {[log.message for log in logs]}",
             )
 
-    def test_default_execution_timeout_applies_when_task_timeout_missing(self):
-        service = WorkerService(ExecutorRegistry(executors={"slow": _SlowExecutor(2.0)}))
+    def test_default_task_timeout_does_not_interrupt_missing_task_timeout(self):
+        service = WorkerService(ExecutorRegistry(executors={"slow": _SlowExecutor(1.2)}))
         with session_scope() as session:
             ticket = self.ticket_service.create_ticket(
-                session, TicketCreateRequest(title="default-timeout")
+                session, TicketCreateRequest(title="default-timeout-is-metadata")
             )
             task = self.ticket_service.create_task(
                 session,
@@ -321,15 +322,19 @@ class WorkerServiceTests(unittest.TestCase):
 
         with patch("evercore.services.worker_service.settings.default_task_timeout_seconds", 1):
             with session_scope() as session:
-                result = service.process_once(session, worker_id="worker-default-timeout")
+                result = service.process_once(session, worker_id="worker-default-timeout-metadata")
                 self.assertTrue(result.processed)
                 row = session.exec(select(Task).where(Task.id == task_id)).first()
-                self.assertEqual(row.state, "retrying")
-                self.assertIn("timed out", row.error_message)
+                self.assertEqual(row.state, "completed")
+                self.assertFalse(row.error_message)
 
-    def test_timeout_recovery_handler_can_complete_task(self):
+    def test_timeout_recovery_handler_is_not_used_without_hard_timeout(self):
+        recovery_called = False
+
         def recovery_handler(ticket, task, executor, timeout_seconds):
+            nonlocal recovery_called
             del ticket, task, executor, timeout_seconds
+            recovery_called = True
             return ExecutionResult(
                 success=True,
                 message="recovered after timeout",
@@ -337,7 +342,7 @@ class WorkerServiceTests(unittest.TestCase):
             )
 
         service = WorkerService(
-            ExecutorRegistry(executors={"slow": _SlowExecutor(2.0)}),
+            ExecutorRegistry(executors={"slow": _SlowExecutor(1.2)}),
             timeout_recovery_handler=recovery_handler,
         )
         with session_scope() as session:
@@ -356,7 +361,8 @@ class WorkerServiceTests(unittest.TestCase):
             self.assertTrue(result.processed)
             row = session.exec(select(Task).where(Task.id == task_id)).first()
             self.assertEqual(row.state, "completed")
-            self.assertEqual(row.result_data.get("recovered"), True)
+            self.assertFalse(recovery_called)
+            self.assertNotEqual(row.result_data.get("recovered"), True)
 
 
 if __name__ == "__main__":
